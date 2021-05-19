@@ -177,10 +177,10 @@ spec:
         imagePullPolicy: Always
         image: "solsson/kafka:2.8.0-zookeeper-server-start"
         args:
-	- /etc/kafka/zookeeper.properties.scale-$(REPLICAS).$(POD_NAME)
+        - /etc/kafka/zookeeper.properties.scale-$(REPLICAS).$(POD_NAME)
         env:
-	- name: REPLICAS
-	  value: "3"
+        - name: REPLICAS
+          value: 3
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -188,8 +188,8 @@ spec:
         - name: KAFKA_LOG4J_OPTS
           value: -Dlog4j.configuration=file:/etc/kafka/log4j.properties
         resources:
-	  limits:
-	    memory: 120Mi
+          limits:
+            memory: 120Mi
           requests:
             memory: 100Mi
             cpu: 10m
@@ -207,7 +207,7 @@ spec:
             - -c
             - '[ "imok" = "$(echo ruok | nc -w 1 -q 1 127.0.0.1 2181)" ]'
           initialDelaySeconds: 10
-	  periodSeconds: 30
+          periodSeconds: 30
           timeoutSeconds: 5
         lifecycle:
           preStop:
@@ -218,7 +218,7 @@ spec:
               - kill -s TERM 1; while $(kill -0 1 2>/dev/null); do sleep 1; done
         volumeMounts:
         - name: config
-	  mountPath: /etc/kafka
+          mountPath: /etc/kafka
         - name: data
           mountPath: /var/lib/zookeeper
         initContainers:
