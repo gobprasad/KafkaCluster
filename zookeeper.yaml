@@ -98,6 +98,51 @@ spec:
   selector:
     app: dbng-zookeeper
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zookeeper-config
+  namespace: kafka
+data:
+  init.sh: |-
+    #!/bin/bash
+    set -e
+    set -x
+
+    [ ! -d /var/lib/zookeeper/data ] && mkdir -m 770 /var/lib/zookeeper/data && chgrp $(stat -c '%g' /var/lib/zookeeper) /var/lib/zookeeper/data
+    [ -z "$ID_OFFSET" ] && ID_OFFSET=1
+    export ZOOKEEPER_SERVER_ID=$((${HOSTNAME##*-} + $ID_OFFSET))
+    echo "${ZOOKEEPER_SERVER_ID:-1}" | tee /var/lib/zookeeper/data/myid
+    cp -Lur /etc/kafka-configmap/* /etc/kafka/
+    [ ! -z "$PZOO_REPLICAS" ] && [ ! -z "$REPLICAS" ] && {
+      sed -i "s/^server\\./#server./" /etc/kafka/zookeeper.properties
+      for N in $(seq $PZOO_REPLICAS); do echo "server.$N=dbng-zookeeper-$(( $N - 1 )).dbng-zookeeper-hs.$POD_NAMESPACE.svc.cluster.local:2888:3888:participant" >> /etc/kafka/zookeeper.properties; done
+      #for N in $(seq $(( $REPLICAS - $PZOO_REPLICAS ))); do echo "server.$(( $PZOO_REPLICAS + $N ))=zoo-$(( $N - 1 )).zoo.$POD_NAMESPACE.svc.cluster.local:2888:3888:participant" >> /etc/kafka/zookeeper.properties; done
+    }
+    ln -s /etc/kafka/zookeeper.properties /etc/kafka/zookeeper.properties.scale-$REPLICAS.$POD_NAME
+  log4j.properties: |-
+    log4j.rootLogger=INFO, stdout
+    log4j.appender.stdout=org.apache.log4j.ConsoleAppender
+    log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
+    log4j.appender.stdout.layout.ConversionPattern=[%d] %p %m (%c)%n
+
+    # Suppress connection log messages, one line per readiness probe
+    log4j.logger.org.apache.zookeeper.server.NIOServerCnxn=WARN
+  zookeeper.properties: |
+    4lw.commands.whitelist=ruok
+    tickTime=2000
+    dataDir=/var/lib/zookeeper/data
+    dataLogDir=/var/lib/zookeeper/log
+    clientPort=2181
+    maxClientCnxns=3
+    initLimit=5
+    syncLimit=2
+    tcpKeepAlive=true
+    electionPortBindRetry=0
+    server.1=dbng-zookeeper-0.dbng-zookeeper-hs:2888:3888:participant
+    server.2=dbng-zookeeper-1.dbng-zookeeper-hs:2888:3888:participant
+    server.3=dbng-zookeeper-2.dbng-zookeeper-hs:2888:3888:participant
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -130,11 +175,24 @@ spec:
       containers:
       - name: dbng-zookeeper
         imagePullPolicy: Always
-        image: "k8s.gcr.io/kubernetes-zookeeper:1.0-3.4.10"
+        image: "solsson/kafka:2.8.0-zookeeper-server-start"
+        args:
+	- /etc/kafka/zookeeper.properties.scale-$(REPLICAS).$(POD_NAME)
+        env:
+	- name: REPLICAS
+	  value: "3"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: KAFKA_LOG4J_OPTS
+          value: -Dlog4j.configuration=file:/etc/kafka/log4j.properties
         resources:
+	  limits:
+	    memory: 120Mi
           requests:
-            memory: "120Mi"
-            cpu: "0.5"
+            memory: 100Mi
+            cpu: 10m
         ports:
         - containerPort: 2181
           name: client
@@ -142,52 +200,67 @@ spec:
           name: server
         - containerPort: 3888
           name: leader-election
-        command:
-        - sh
-        - -c
-        - "start-zookeeper \
-          --servers=3 \
-          --data_dir=/var/lib/zookeeper/data \
-          --data_log_dir=/var/lib/zookeeper/data/log \
-          --conf_dir=/opt/zookeeper/conf \
-          --client_port=2181 \
-          --election_port=3888 \
-          --server_port=2888 \
-          --tick_time=2000 \
-          --init_limit=10 \
-          --sync_limit=5 \
-          --heap=100M \
-          --max_client_cnxns=60 \
-          --snap_retain_count=3 \
-          --purge_interval=12 \
-          --max_session_timeout=40000 \
-          --min_session_timeout=4000 \
-          --log_level=INFO"
         readinessProbe:
           exec:
             command:
-            - sh
+            - /bin/sh
             - -c
-            - "zookeeper-ready 2181"
+            - '[ "imok" = "$(echo ruok | nc -w 1 -q 1 127.0.0.1 2181)" ]'
           initialDelaySeconds: 10
+	  periodSeconds: 30
           timeoutSeconds: 5
-        livenessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "zookeeper-ready 2181"
-          initialDelaySeconds: 10
-          timeoutSeconds: 5
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -ce
+              - kill -s TERM 1; while $(kill -0 1 2>/dev/null); do sleep 1; done
         volumeMounts:
-        - name: pv
+        - name: config
+	  mountPath: /etc/kafka
+        - name: data
           mountPath: /var/lib/zookeeper
+        initContainers:
+        - command:
+          - /bin/bash
+          - /etc/kafka-configmap/init.sh
+          env:
+          - name: PZOO_REPLICAS
+            value: "0"
+          - name: REPLICAS
+            value: "3"
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: ID_OFFSET
+            value: "1"
+          image: solsson/kafka:initutils-nonroot
+          name: init-config
+          volumeMounts:
+          - mountPath: /etc/kafka-configmap
+            name: configmap
+          - mountPath: /etc/kafka
+            name: config
+          - mountPath: /var/lib/zookeeper
+            name: data
       securityContext:
-        runAsUser: 1000
-        fsGroup: 1000
+        fsGroup: 65534
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - configMap:
+          name: zookeeper-config
+        name: configmap
+      - emptyDir: {}
+        name: config
   volumeClaimTemplates:
   - metadata:
-      name: pv
+      name: data
     spec:
       accessModes: [ "ReadWriteOnce" ]
       storageClassName: local-storage
