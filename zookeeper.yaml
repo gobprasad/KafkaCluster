@@ -11,7 +11,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   hostPath:
-    path: /tmp
+    path: /tmp/data
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -34,7 +34,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   hostPath:
-    path: /tmp
+    path: /tmp/data
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -57,7 +57,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   hostPath:
-    path: /tmp
+    path: /tmp/data
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -117,7 +117,7 @@ data:
     [ ! -z "$PZOO_REPLICAS" ] && [ ! -z "$REPLICAS" ] && {
       sed -i "s/^server\\./#server./" /etc/kafka/zookeeper.properties
       for N in $(seq $PZOO_REPLICAS); do echo "server.$N=dbng-zookeeper-$(( $N - 1 )).dbng-zookeeper-hs.$POD_NAMESPACE.svc.cluster.local:2888:3888:participant" >> /etc/kafka/zookeeper.properties; done
-      #for N in $(seq $(( $REPLICAS - $PZOO_REPLICAS ))); do echo "server.$(( $PZOO_REPLICAS + $N ))=zoo-$(( $N - 1 )).zoo.$POD_NAMESPACE.svc.cluster.local:2888:3888:participant" >> /etc/kafka/zookeeper.properties; done
+      for N in $(seq $(( $REPLICAS - $PZOO_REPLICAS ))); do echo "server.$(( $PZOO_REPLICAS + $N ))=dbng-zookeeper-$(( $N - 1 )).dbng-zookeeper-hs.$POD_NAMESPACE.svc.cluster.local:2888:3888:participant" >> /etc/kafka/zookeeper.properties; done
     }
     ln -s /etc/kafka/zookeeper.properties /etc/kafka/zookeeper.properties.scale-$REPLICAS.$POD_NAME
   log4j.properties: |-
@@ -139,9 +139,9 @@ data:
     syncLimit=2
     tcpKeepAlive=true
     electionPortBindRetry=0
-    server.1=dbng-zookeeper-0.dbng-zookeeper-hs:2888:3888:participant
-    server.2=dbng-zookeeper-1.dbng-zookeeper-hs:2888:3888:participant
-    server.3=dbng-zookeeper-2.dbng-zookeeper-hs:2888:3888:participant
+    server.1=dbng-zookeeper-0.dbng-zookeeper-hs.kafka.svc.cluster.local:2888:3888:participant
+    server.2=dbng-zookeeper-1.dbng-zookeeper-hs.kafka.svc.cluster.local:2888:3888:participant
+    server.3=dbng-zookeeper-2.dbng-zookeeper-hs.kafka.svc.cluster.local:2888:3888:participant
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -180,7 +180,7 @@ spec:
         - /etc/kafka/zookeeper.properties.scale-$(REPLICAS).$(POD_NAME)
         env:
         - name: REPLICAS
-          value: 3
+          value: "3"
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -221,34 +221,34 @@ spec:
           mountPath: /etc/kafka
         - name: data
           mountPath: /var/lib/zookeeper
-        initContainers:
-        - command:
-          - /bin/bash
-          - /etc/kafka-configmap/init.sh
-          env:
-          - name: PZOO_REPLICAS
-            value: "0"
-          - name: REPLICAS
-            value: "3"
-          - name: POD_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.name
-          - name: POD_NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          - name: ID_OFFSET
-            value: "1"
-          image: solsson/kafka:initutils-nonroot
-          name: init-config
-          volumeMounts:
-          - mountPath: /etc/kafka-configmap
-            name: configmap
-          - mountPath: /etc/kafka
-            name: config
-          - mountPath: /var/lib/zookeeper
-            name: data
+      initContainers:
+      - command:
+        - /bin/bash
+        - /etc/kafka-configmap/init.sh
+        env:
+        - name: PZOO_REPLICAS
+          value: "0"
+        - name: REPLICAS
+          value: "3"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: ID_OFFSET
+          value: "1"
+        image: solsson/kafka:initutils-nonroot
+        name: init-config
+        volumeMounts:
+        - mountPath: /etc/kafka-configmap
+          name: configmap
+        - mountPath: /etc/kafka
+          name: config
+        - mountPath: /var/lib/zookeeper
+          name: data
       securityContext:
         fsGroup: 65534
       terminationGracePeriodSeconds: 10
