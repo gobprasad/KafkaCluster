@@ -146,7 +146,7 @@ data:
      printf '%s\n' "${SEDS[@]}" | sed -f - /etc/kafka-configmap/server.properties > /etc/kafka/server.properties.tmp
      [ $? -eq 0 ] && mv /etc/kafka/server.properties.tmp /etc/kafka/server.properties
      ln -s /etc/kafka/server.properties /etc/kafka/server.properties.$POD_NAME
-   log4j.properties: |-
+  log4j.properties: |-
      # Unspecified loggers and loggers with additivity=true output to server.log and stdout
      # Note that INFO only applies to unspecified loggers, the log level of the child logger is used otherwise
      log4j.rootLogger=INFO, stdout
@@ -222,7 +222,7 @@ data:
      # Change to DEBUG to enable audit log for the authorizer
      log4j.logger.kafka.authorizer.logger=WARN, authorizerAppender
      log4j.additivity.kafka.authorizer.logger=false
-   server.properties: "############################# Log Basics #############################\n\n#
+  server.properties: "############################# Log Basics #############################\n\n#
      A comma seperated list of directories under which to store log files\n# Overrides
      log.dir\nlog.dirs=/var/lib/kafka/data/topics\n\n# The default number of log partitions
      per topic. More partitions allow greater\n# parallelism for consumption, but this
