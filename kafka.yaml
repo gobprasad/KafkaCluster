@@ -3,6 +3,60 @@ kind: Namespace
 metadata:
     name: kafka
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-labler
+  namespace: kafka
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - update
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kafka-pod-labler
+  namespace: kafka
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-labler
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: kafka
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-reader
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kafka-node-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-reader
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: kafka
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -132,7 +186,10 @@ data:
 
        [ -z "$ADVERTISE_ADDR" ] && echo "ADVERTISE_ADDR is empty, will advertise detected DNS name"
        OUTSIDE_HOST=$(kubectl get node "$NODE_NAME" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
-       OUTSIDE_PORT=$((32400 + ${KAFKA_BROKER_ID}))
+       #OUTSIDE_PORT=$((32400 + ${KAFKA_BROKER_ID}))
+       #OUTSIDE_HOST=$(kubectl get node "$NODE_NAME" -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
+       #OUTSIDE_PORT=${OutsidePort}
+       OUTSIDE_PORT=9094
        SEDS+=("s|#init#advertised.listeners=PLAINTEXT://#init#|advertised.listeners=PLAINTEXT://${ADVERTISE_ADDR}:9092,OUTSIDE://${OUTSIDE_HOST}:${OUTSIDE_PORT}|")
        ANNOTATIONS="$ANNOTATIONS kafka-listener-outside-host=$OUTSIDE_HOST kafka-listener-outside-port=$OUTSIDE_PORT"
 
@@ -325,11 +382,11 @@ spec:
       containers:
       - name: dbng-kafka-broker
         imagePullPolicy: IfNotPresent
-        image: "solsson/kafka:2.8.0-server-start"
+        image: "solsson/kafka:2.8.0-kafka-server-start"
         args:
         - /etc/kafka/server.properties.$(POD_NAME)
         - --override
-        - zookeeper.connect=dbng-zookeeper-0.zookeeper-service-hs.zookeeper.svc.cluster.local:2181,dbng-zookeeper-1.zookeeper-service-hs.zookeeper.svc.cluster.local:2181,dbng-zookeeper-2.zookeeper-service-hs.zookeeper.svc.cluster.local:2181
+        - zookeeper.connect=dbng-zookeeper-0.dbng-zookeeper-hs.zookeeper.svc.cluster.local:2181,dbng-zookeeper-1.dbng-zookeeper-hs.zookeeper.svc.cluster.local:2181,dbng-zookeeper-2.dbng-zookeeper-hs.zookeeper.svc.cluster.local:2181
         env:
         - name: POD_NAMESPACE
           valueFrom:
@@ -353,6 +410,7 @@ spec:
         - containerPort: 9092
           name: inside
         - containerPort: 9094
+          hostPort: 9094
           name: outside
         - containerPort: 5555
           name: jmx
